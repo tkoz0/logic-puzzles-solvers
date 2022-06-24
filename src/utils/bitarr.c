@@ -6,6 +6,8 @@
 #include <check.h>
 #include <stdint.h>
 
+#define SUITE_NAME "bitarr"
+
 START_TEST(test_BIT_GET)
 {
     uint8_t  a = 0x1C;
@@ -77,11 +79,13 @@ Suite *sudoku_suite()
 {
     Suite *s;
     TCase *tc;
-    s = suite_create("bitarr");
-    tc = tcase_create("bitarr");
+    s = suite_create(SUITE_NAME);
+    tc = tcase_create(SUITE_NAME);
+    // TEST CASE LIST START
     tcase_add_test(tc,test_BIT_GET);
     tcase_add_test(tc,test_BIT_SET);
     tcase_add_test(tc,test_BIT_UNSET);
+    // TEST CASE LIST END
     suite_add_tcase(s,tc);
     return s;
 }
