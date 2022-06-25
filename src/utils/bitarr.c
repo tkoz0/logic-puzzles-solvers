@@ -75,7 +75,7 @@ START_TEST(test_BIT_UNSET)
 }
 END_TEST
 
-Suite *sudoku_suite()
+Suite *suite()
 {
     Suite *s;
     TCase *tc;
@@ -95,7 +95,7 @@ int main(int argc, char **argv)
     int failed;
     Suite *s;
     SRunner *sr;
-    s = sudoku_suite();
+    s = suite();
     sr = srunner_create(s);
     srunner_run_all(sr,CK_VERBOSE);
     failed = srunner_ntests_failed(sr);
