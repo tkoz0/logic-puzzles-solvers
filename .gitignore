@@ -1,4 +1,6 @@
 *.o
 *.out
 *.html
-c_solvers/docs
+/c_solvers/docs
+/data
+__pycache__
