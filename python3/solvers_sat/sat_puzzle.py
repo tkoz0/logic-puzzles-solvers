@@ -1,6 +1,6 @@
 from itertools import chain
 import pycosat
-from typing import Any, Iterator, List
+from typing import Any, Iterator, List, Set, Tuple
 
 class SatPuzzleBase:
     def toCnf(self) -> List[List[int]]:
@@ -83,9 +83,9 @@ class SatPuzzleLatinSquare(SatPuzzleSudokuGeneral):
     Square grid of side length N
     - each row/col must contain 1,2,..,N
     '''
-    def __init__(self, size: int, givens: List[List[int]]):
-        assert size > 0
-        N = size
+    def __init__(self, givens: List[List[int]]):
+        N = len(givens)
+        assert N > 0
         assert len(givens) == N and all(len(row) == N for row in givens) and all(0 <= n <= N for n in sum(givens,[]))
         areas = []
         for r in range(N): # rows
@@ -101,9 +101,9 @@ class SatPuzzleLatinSquareX(SatPuzzleLatinSquare):
     '''
     Latin square with diagonals
     '''
-    def __init__(self, size: int, givens: List[List[int]]):
-        N = size
-        super().__init__(N,givens)
+    def __init__(self, givens: List[List[int]]):
+        N = len(givens)
+        super().__init__(givens)
         self.areas.append(list(range(0,N*N,N+1)))
         self.areas.append(list(range(N-1,N*N-1,N-1)))
 
@@ -114,7 +114,8 @@ class SatPuzzleSudokuStandard(SatPuzzleLatinSquare):
     def __init__(self, blockR: int, blockC: int, givens: List[List[int]]):
         assert blockR > 0 and blockC > 0
         N = blockR*blockC
-        super().__init__(N,givens)
+        assert len(givens) == N
+        super().__init__(givens)
         for r in range(blockC): # blocks
             for c in range(blockR):
                 self.areas.append([(r*blockR+rr)*N+(c*blockC+cc) for rr in range(blockR) for cc in range(blockC)])
@@ -133,9 +134,12 @@ class SatPuzzleSudokuJigsaw(SatPuzzleLatinSquare):
     '''
     Divides grid into (irregular) areas
     '''
-    def __init__(self, nums: int, givens: List[List[int]], areas: List[List[int]]):
-        assert nums > 0
-        super().__init__(nums,givens)
+    def __init__(self, givens: List[List[int]], areas: List[List[int]]):
+        N = len(givens)
+        assert N > 0
+        assert len(areas) == N
+        assert all(len(row) == N for row in areas)
+        super().__init__(givens)
         for symb in set(sum(areas,[])): # add areas
             self.areas.append([i for i,a in enumerate(sum(areas,[])) if a == symb])
 
@@ -143,9 +147,9 @@ class SatPuzzleSudokuJigsawX(SatPuzzleSudokuJigsaw):
     '''
     Jigsaw sudoku with main diagonals
     '''
-    def __init__(self, nums: int, givens: List[List[int]], areas: List[List[int]]):
-        super().__init__(nums,givens,areas)
-        N = nums
+    def __init__(self, givens: List[List[int]], areas: List[List[int]]):
+        super().__init__(givens,areas)
+        N = len(givens)
         self.areas.append(list(range(0,N*N,N+1)))
         self.areas.append(list(range(N-1,N*N-1,N-1)))
 
@@ -304,28 +308,167 @@ class SatPuzzleSudokuGattai8(SatPuzzleSudokuGeneral):
 class SatPuzzleSudokuConsecutive(SatPuzzleLatinSquare):
     '''
     Latin square with markings for orthogonally adjacent cells having consecutive values
+    - consecutive pairs are specified as a set of coordinate pairs which must only be orthogonally adjacent
     '''
-    def __init__(self, size: int, givens: List[List[int]], consecH: List[List[bool]], consecV: List[List[bool]]):
-        N = size
-        super().__init__(N,givens)
-        assert len(consecH) == N-1 and all(len(row) == N for row in consecH)
-        assert len(consecV) == N and all(len(row) == N-1 for row in consecV)
-        self.consecH = [row[:] for row in consecH]
-        self.consecV = [row[:] for row in consecV]
-    def toCnf(self) -> List[List[int]]:
+    def __init__(self, givens: List[List[int]], consec_pairs: Set[Tuple[Tuple[int,int],Tuple[int,int]]]):
+        N = len(givens)
+        super().__init__(givens)
+        assert all(0 <= r1 < N and 0 <= c1 < N and 0 <= r2 < N and 0 <= c2 < N for (r1,c1),(r2,c2) in consec_pairs)
+        self.consec_pairs = set(p for p in consec_pairs)
+    def toCnf(self) -> List[List[int]]: # extend to add extra constraints
         result = super().toCnf()
         N = self.nums
         x = lambda r,c,n : 1 + (r*N+c)*N + (n-1) # get variable number
-        consec = [(a,b) for a in range(1,N+1) for b in range(1,N+1) if a == b+1 or a+1 == b]
-        nonconsec = [(a,b) for a in range(1,N+1) for b in range(1,N+1) if a != b and a != b+1 and a+1 != b]
+        consec = [(a,b) for a in range(1,N+1) for b in range(1,N+1) if abs(a-b) == 1]
+        nonconsec = [(a,b) for a in range(1,N+1) for b in range(1,N+1) if abs(a-b) > 1]
         for r in range(N-1): # horizontal markers - (r,c) and (r+1,c)
             for c in range(N):
                 # if must be consecutive, then for any pair of nonconsecutive numbers, either cell is not equal to it
                 # if must not be consecutive, then for any pair of consecutive numbers, either cell is not equal to it
-                for a,b in nonconsec if self.consecH[r][c] else consec:
+                for a,b in nonconsec if ((r,c),(r+1,c)) in self.consec_pairs else consec:
                     result.append([-x(r,c,a),-x(r+1,c,b)])
         for r in range(N): # vertical markers - (r,c) and (r,c+1)
             for c in range(N-1):
-                for a,b in nonconsec if self.consecV[r][c] else consec:
+                for a,b in nonconsec if ((r,c),(r,c+1)) in self.consec_pairs else consec:
                     result.append([-x(r,c,a),-x(r,c+1,b)])
+        return result
+
+class SatPuzzleSudokuKropki(SatPuzzleSudokuStandard):
+    '''
+    Blank standard sudoku grid with
+    - white circle means adjacent values must be consecutive
+    - black circle means one of the value is double of the other
+    - adjacent cells without a circle must be neither
+    '''
+    def __init__(self, blockR: int, blockC, white: Set[Tuple[Tuple[int,int],Tuple[int,int]]], black: Set[Tuple[Tuple[int,int],Tuple[int,int]]]):
+        N = blockR*blockC
+        super().__init__(blockR,blockC,[[0]*N for _ in range(N)])
+        assert all(0 <= r1 < N and 0 <= c1 < N and 0 <= r2 < N and 0 <= c2 < N for (r1,c1),(r2,c2) in white)
+        assert all(0 <= r1 < N and 0 <= c1 < N and 0 <= r2 < N and 0 <= c2 < N for (r1,c1),(r2,c2) in black)
+        assert white & black == set()
+        self.white = set(p for p in white)
+        self.black = set(p for p in black)
+    def toCnf(self) -> List[List[int]]: # extend to add extra constraints
+        result = super().toCnf()
+        N = self.nums
+        x = lambda r,c,n : 1 + (r*N+c)*N + (n-1) # get variable number
+        # sets of possible pairs
+        consec = set((a,b) for a in range(1,N+1) for b in range(1,N+1) if abs(a-b) == 1)
+        double = set((a,b) for a in range(1,N+1) for b in range(1,N+1) if a == 2*b or a*2 == b)
+        neither = set((a,b) for a in range(1,N+1) for b in range(1,N+1) if a != b and ((a,b) not in consec) and ((a,b) not in double))
+        all_pairs = set((a,b) for a in range(1,N+1) for b in range(1,N+1) if a != b)
+        # complements for adding clauses
+        c_consec = all_pairs - consec
+        c_double = all_pairs - double
+        c_neither = all_pairs - neither
+        for r in range(N-1): # circles on horizontal (vertical pair)
+            for c in range(N):
+                pairs = c_consec if ((r,c),(r+1,c)) in self.white else (c_double if ((r,c),(r+1,c)) in self.black else c_neither)
+                for a,b in pairs:
+                    result.append([-x(r,c,a),-x(r+1,c,b)])
+        for r in range(N): # circles on vertical (horizontal pair)
+            for c in range(N-1):
+                pairs = c_consec if ((r,c),(r,c+1)) in self.white else (c_double if ((r,c),(r,c+1)) in self.black else c_neither)
+                for a,b in pairs:
+                    result.append([-x(r,c,a),-x(r,c+1,b)])
+        return result
+
+class SatPuzzleSudokuMagicNumberX(SatPuzzleLatinSquareX):
+    '''
+    Variant where lines between cells indicate that the 2 must sum to the given magic number
+    '''
+    def __init__(self, givens: List[List[int]], magic: int, pairs: Set[Tuple[Tuple[int,int],Tuple[int,int]]]):
+        N = len(givens)
+        super().__init__(givens)
+        self.magic = magic
+        assert all(0 <= r1 < N and 0 <= c1 < N and 0 <= r2 < N and 0 <= c2 < N for (r1,c1),(r2,c2) in pairs)
+        self.pairs = set(p for p in pairs)
+    def toCnf(self) -> List[List[int]]:
+        result = super().toCnf()
+        N = self.nums
+        x = lambda r,c,n : 1 + (r*N+c)*N + (n-1) # get variable number
+        not_magic_sum = [(a,b) for a in range(1,N+1) for b in range(1,N+1) if a != b and a+b != self.magic]
+        for (r1,c1),(r2,c2) in self.pairs:
+            for a,b in not_magic_sum: # at least 1 of these must not be set
+                result.append([-x(r1,c1,a),-x(r2,c2,b)])
+        return result
+
+class SatPuzzleSudokuSamurai(SatPuzzleSudokuGeneral):
+    '''
+    5 standard sudokus overlapping in a '+' shape
+    '''
+    def __init__(self, givens: List[List[int]]):
+        # some parts of the area are ignored
+        assert len(givens) == 21 and all(len(row) == 21 for row in givens)
+        areas = []
+        for r in chain(range(0,9),range(12,21)): # top/bottom rows
+            areas.append(list(range(21*r+0,21*r+9)))
+            areas.append(list(range(21*r+12,21*r+21)))
+        for c in chain(range(0,9),range(12,21)): # left/right columns
+            areas.append(list(range(21*0+c,21*9+c,21)))
+            areas.append(list(range(21*12+c,21*21+c,21)))
+        for r in range(6,15): # middle rows
+            areas.append(list(range(21*r+6,21*r+15)))
+        for c in range(6,15): # middle columns
+            areas.append(list(range(21*6+c,21*15+c,21)))
+        for r in range(0,21,3): # all 3x3 blocks
+            for c in range(0,21,3):
+                areas.append([21*(r+rr)+(c+cc) for rr in range(3) for cc in range(3)])
+        givens2 = [row[:] for row in givens]
+        # set ignored parts to 1..9
+        for rr in range(3):
+            for cc in range(3):
+                n = 3*rr+cc+1
+                givens2[rr][9+cc] = givens2[3+rr][9+cc] = givens2[9+rr][cc] = givens2[9+rr][3+cc] = n
+                givens2[9+rr][15+cc] = givens2[9+rr][18+cc] = givens2[15+rr][9+cc] = givens2[18+rr][9+cc] = n
+        super().__init__(21*21,9,areas,sum(givens2,[]))
+    def toSol(self, satSol: List[int]) -> List[List[int]]:
+        superSol = super().toSol(satSol)
+        sol = [superSol[i:i+21] for i in range(0,21*21,21)]
+        # set corners to zeroes and return
+        for rr in range(3):
+            for cc in range(3):
+                sol[rr][9+cc] = sol[3+rr][9+cc] = sol[9+rr][cc] = sol[9+rr][3+cc] = 0
+                sol[9+rr][15+cc] = sol[9+rr][18+cc] = sol[15+rr][9+cc] = sol[18+rr][9+cc] = 0
+        return sol
+
+class SatPuzzleSudokuOddEven(SatPuzzleSudokuStandard):
+    '''
+    Variant with all odd numbers marked by circles
+    '''
+    def __init__(self, blockR: int, blockC: int, givens: List[List[int]], odds: List[List[bool]]):
+        super().__init__(blockR,blockC,givens)
+        N = len(givens)
+        assert len(odds) == N and all(len(row) == N for row in odds)
+        self.odds = [row[:] for row in odds]
+    def toCnf(self) -> List[List[int]]:
+        result = super().toCnf()
+        N = self.nums
+        x = lambda r,c,n : 1 + (r*N+c)*N + (n-1) # get variable number
+        for r,row in enumerate(self.odds):
+            for c,odd in enumerate(row):
+                if odd:
+                    for n in range(2,N+1,2):
+                        result.append([-x(r,c,n)])
+        return result
+
+class SatPuzzleSudokuOddEvenSamurai(SatPuzzleSudokuSamurai):
+    def __init__(self, givens: List[List[int]], odds: List[List[bool]]):
+        super().__init__(givens)
+        assert len(odds) == 21 and all(len(row) == 21 for row in odds)
+        self.odds = [row[:] for row in odds]
+        # have to set special odds for the unused parts of the samurai shape
+        for n in range(1,10,2):
+            rr,cc = divmod(n-1,3)
+            self.odds[rr][9+cc] = self.odds[3+rr][9+cc] = self.odds[9+rr][cc] = self.odds[9+rr][3+cc] = True
+            self.odds[9+rr][15+cc] = self.odds[9+rr][18+cc] = self.odds[15+rr][9+cc] = self.odds[18+rr][9+cc] = True
+    def toCnf(self) -> List[List[int]]:
+        result = super().toCnf()
+        x = lambda r,c,n : 1 + (r*21+c)*9 + (n-1)
+        for r,row in enumerate(self.odds):
+            for c,odd in enumerate(row):
+                if odd: # cell must be odd
+                    result.append([x(r,c,n) for n in range(1,10,2)])
+                else: # cell must be even
+                    result.append([x(r,c,n) for n in range(2,10,2)])
         return result

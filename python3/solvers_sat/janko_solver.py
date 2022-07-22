@@ -116,7 +116,7 @@ def _latinsquare_x(data: Dict[str,Any]) -> Tuple[SatPuzzleBase,Any,str]:
     N = int(data['size'])
     givens = grid2numlist(data['problem'])
     solution = grid2numlist(data['solution'])
-    solver = SatPuzzleLatinSquareX(N,givens)
+    solver = SatPuzzleLatinSquareX(givens)
     return solver, solution, f'{N}'
 
 def _sudoku_butterfly(data: Dict[str,Any]) -> Tuple[SatPuzzleBase,Any,str]:
@@ -130,7 +130,7 @@ def _sudoku_jigsaw(data: Dict[str,Any]) -> Tuple[SatPuzzleBase,Any,str]:
     givens = grid2numlist2(data['problem'])
     areas = data['areas']
     solution = grid2numlist2(data['solution'])
-    solver = SatPuzzleSudokuJigsaw(N,givens,areas)
+    solver = SatPuzzleSudokuJigsaw(givens,areas)
     return solver, solution, f'{N}'
 
 def _sudoku_clueless1(data: Dict[str,Any]) -> Tuple[SatPuzzleBase,Any,str]:
@@ -162,10 +162,85 @@ def _sudoku_consecutive(data: Dict[str,Any]) -> Tuple[SatPuzzleBase,Any,str]:
     N = len(givens)
     solution = grid2numlist(data['solution'])
     # parse solution into consecutives
-    consecH = [[solution[r][c] == solution[r+1][c]+1 or solution[r][c]+1 == solution[r+1][c] for c in range(N)] for r in range(N-1)]
-    consecV = [[solution[r][c] == solution[r][c+1]+1 or solution[r][c]+1 == solution[r][c+1] for c in range(N-1)] for r in range(N)]
-    solver = SatPuzzleSudokuConsecutive(N,givens,consecH,consecV)
+    consec_pairs: Set[Tuple[Tuple[int,int],Tuple[int,int]]] = set()
+    for r in range(N-1):
+        for c in range(N):
+            a,b = solution[r][c],solution[r+1][c]
+            if abs(a-b) == 1:
+                consec_pairs.add(((r,c),(r+1,c)))
+    for r in range(N):
+        for c in range(N-1):
+            a,b = solution[r][c],solution[r][c+1]
+            if abs(a-b) == 1:
+                consec_pairs.add(((r,c),(r,c+1)))
+    solver = SatPuzzleSudokuConsecutive(givens,consec_pairs)
     return solver, solution, f'{N}'
+
+def _sudoku_kropki(data: Dict[str,Any]) -> Tuple[SatPuzzleBase,Any,str]:
+    if 'patternx' in data:
+        br,bc = data['patterny'],data['patternx']
+    else: # if not specified by above then use square root
+        assert data['size'] == 9
+        br,bc = 3,3
+    solution = grid2numlist(data['solution'])
+    N = len(solution)
+    white: Set[Tuple[Tuple[int,int],Tuple[int,int]]] = set()
+    black: Set[Tuple[Tuple[int,int],Tuple[int,int]]] = set()
+    for r in range(N-1): # vertical pairs
+        for c in range(N):
+            a,b = solution[r][c],solution[r+1][c]
+            if a*2==b or a==b*2: # 1,2 is marked as black so prioritize this
+                black.add(((r,c),(r+1,c)))
+            elif abs(a-b) == 1:
+                white.add(((r,c),(r+1,c)))
+    for r in range(N): # horizontal pairs
+        for c in range(N-1):
+            a,b = solution[r][c],solution[r][c+1]
+            if a*2==b or a==b*2:
+                black.add(((r,c),(r,c+1)))
+            elif abs(a-b) == 1:
+                white.add(((r,c),(r,c+1)))
+    solver = SatPuzzleSudokuKropki(br,bc,white,black)
+    return solver, solution, f'{N}'
+
+def _sudoku_magicnumberx(data: Dict[str,Any]) -> Tuple[SatPuzzleBase,Any,str]:
+    givens = grid2numlist(data['problem'])
+    N = len(givens)
+    clues = grid2numlist(data['clues'])
+    solution = grid2numlist(data['solution'])
+    pairs: Set[Tuple[Tuple[int,int],Tuple[int,int]]] = set()
+    for r in range(N):
+        for c in range(N):
+            if clues[r][c] == 1 or clues[r][c] == 3: # right edge
+                pairs.add(((r,c),(r,c+1)))
+            if clues[r][c] == 2 or clues[r][c] == 3: # bottom edge
+                pairs.add(((r,c),(r+1,c)))
+    solver = SatPuzzleSudokuMagicNumberX(givens,data['magic'],pairs)
+    return solver, solution, f'{N}'
+
+def _sudoku_samurai(data: Dict[str,Any]) -> Tuple[SatPuzzleBase,Any,str]:
+    givens = grid2numlist(data['problem'])
+    solution = grid2numlist(data['solution'])
+    solver = SatPuzzleSudokuSamurai(givens)
+    return solver, solution, 'samurai'
+
+def _sudoku_oddeven(data: Dict[str,Any]) -> Tuple[SatPuzzleBase,Any,str]:
+    givens = grid2numlist(data['problem'])
+    solution = grid2numlist(data['solution'])
+    odds = [[n % 2 == 1 for n in row] for row in solution]
+    if 'samurai' in data['puzzle']:
+        solver = SatPuzzleSudokuOddEvenSamurai(givens,odds)
+    else:
+        try:
+            blockR,blockC = data['patterny'],data['patternx']
+        except:
+            if data['size'] == 9:
+                blockR,blockC = 3,3
+            else:
+                blockR,blockC = 0,0
+                assert 0
+        solver = SatPuzzleSudokuOddEven(blockR,blockC,givens,odds)
+    return solver, solution, f'{len(givens)}'
 
 # convert the data object to a solver object, provided solution, and category
 parsers: Dict[str,Callable[[Dict[str,Any]],Tuple[SatPuzzleBase,Any,str]]] = \
@@ -179,7 +254,12 @@ parsers: Dict[str,Callable[[Dict[str,Any]],Tuple[SatPuzzleBase,Any,str]]] = \
     'Sudoku_Flower': _sudoku_flower,
     'Sudoku_Gattai-8': _sudoku_gattai8,
     'Sudoku_Killer': _not_implemented,
-    'Sudoku_Konsekutiv': _sudoku_consecutive
+    'Sudoku_Konsekutiv': _sudoku_consecutive,
+    'Sudoku_Kropki': _sudoku_kropki,
+    'Sudoku_Magic-Number': _sudoku_magicnumberx,
+    'Sudoku-Odd-Even': _sudoku_oddeven,
+    'Sudoku_Odd-Even': _sudoku_oddeven,
+    'Sudoku_Samurai': _sudoku_samurai
 }
 
 global_start = time.perf_counter()
