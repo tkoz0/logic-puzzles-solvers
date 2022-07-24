@@ -155,8 +155,6 @@ class SatPuzzleSudokuJigsawX(SatPuzzleSudokuJigsaw):
         self.areas.append(list(range(0,N*N,N+1)))
         self.areas.append(list(range(N-1,N*N-1,N-1)))
 
-# TODO make a class for the overlapping sudoku types generalized with blockR,blockC using grid aligned puzzles sharing some blocks
-
 class SatPuzzleSudokuOverlap(SatPuzzleSudokuGeneral):
     '''
     Generalization of sudoku variants that overlap standard puzzles
@@ -164,8 +162,9 @@ class SatPuzzleSudokuOverlap(SatPuzzleSudokuGeneral):
     '''
     def __init__(self, blockR: int, blockC: int, givens: List[List[int]], corners: List[Tuple[int,int]]):
         N = blockR*blockC
-        brows = max(p[0] for p in corners) + blockC
-        bcols = max(p[1] for p in corners) + blockR
+        assert all(pr%blockR == 0 and pc%blockC == 0 for pr,pc in corners)
+        brows = max(p[0] for p in corners)//blockR + blockC
+        bcols = max(p[1] for p in corners)//blockC + blockR
         R = brows*blockR
         C = bcols*blockC
         self.rows = R
@@ -177,7 +176,6 @@ class SatPuzzleSudokuOverlap(SatPuzzleSudokuGeneral):
         areas = []
         self.blockmap = [[False]*bcols for _ in range(brows)]
         for pr,pc in corners: # for each (overlapping) standard sudoku
-            assert pr % blockR == 0 and pc % blockC == 0
             for r in range(pr,pr+N): # rows
                 areas.append(list(range(r*C+pc,r*C+pc+N)))
             for c in range(pc,pc+N): # cols
@@ -195,6 +193,7 @@ class SatPuzzleSudokuOverlap(SatPuzzleSudokuGeneral):
                 if not used:
                     for r in range(blockR):
                         for c in range(blockC):
+                            assert givens[brow*blockR+r][bcol*blockC+c] == 0 # should provide 0 in unused space
                             givens2[brow*blockR+r][bcol*blockC+c] = 1
         super().__init__(R*C,N,areas,sum(givens2,[]))
     def toSol(self, satSol: List[int]) -> List[List[int]]:
@@ -209,27 +208,9 @@ class SatPuzzleSudokuOverlap(SatPuzzleSudokuGeneral):
                             gridSol[brow*self.blockR+r][bcol*self.blockC+c] = 0
         return gridSol
 
-class SatPuzzleSudokuButterfly(SatPuzzleSudokuGeneral):
-    '''
-    12x12 grid with 4 9x9 standard sudoku
-    only supporting standard type for now
-    '''
+class SatPuzzleSudokuButterfly(SatPuzzleSudokuOverlap):
     def __init__(self, givens: List[List[int]]):
-        assert len(givens) == 12 and all(len(row) == 12 for row in givens)
-        areas = []
-        for r in range(12):
-            areas.append(list(range(12*r+0,12*r+9))) # left
-            areas.append(list(range(12*r+3,12*r+12))) # right
-        for c in range(12):
-            areas.append(list(range(0*12+c,9*12,12))) # top
-            areas.append(list(range(3*12+c,12*12,12))) # bottom
-        for r in range(0,12,3): # blocks
-            for c in range(0,12,3):
-                areas.append([12*(r+rr)+(c+cc) for rr in range(3) for cc in range(3)])
-        super().__init__(12*12,9,areas,sum(givens,[]))
-    def toSol(self, satSol: List[int]) -> List[List[int]]:
-        sol = super().toSol(satSol)
-        return [sol[i:i+12] for i in range(0,12*12,12)]
+        super().__init__(3,3,givens,[(0,0),(0,3),(3,0),(3,3)])
 
 class SatPuzzleSudokuCluelessBase(SatPuzzleSudokuGeneral):
     '''
@@ -280,86 +261,13 @@ class SatPuzzleSudokuClueless2(SatPuzzleSudokuCluelessBase):
             self.areas.append([27*r+i for r in indexes]) # col
         # blocks are redundant since they are part of other sub puzzles
 
-class SatPuzzleSudokuFlower(SatPuzzleSudokuGeneral):
-    '''
-    5 standard sudokus overlapping in a '+' shape
-    '''
+class SatPuzzleSudokuFlower(SatPuzzleSudokuOverlap):
     def __init__(self, givens: List[List[int]]):
-        # the corners are ignored
-        assert len(givens) == 15 and all(len(row) == 15 for row in givens)
-        areas = []
-        for r in chain(range(3),range(12,15)): # top/bottom rows
-            areas.append(list(range(15*r+3,15*r+12)))
-        for c in chain(range(3),range(12,15)): # left/right columns
-            areas.append(list(range(15*3+c,15*12+c,15)))
-        for r in range(3,12): # middle rows
-            areas.append(list(range(15*r+0,15*r+9)))
-            areas.append(list(range(15*r+3,15*r+12)))
-            areas.append(list(range(15*r+6,15*r+15)))
-        for c in range(3,12): # middle columns
-            areas.append(list(range(15*0+c,15*9+c,15)))
-            areas.append(list(range(15*3+c,15*12+c,15)))
-            areas.append(list(range(15*6+c,15*15+c,15)))
-        # set all 3x3 blocks
-        for r in range(0,15,3):
-            for c in range(0,15,3):
-                areas.append([15*(r+rr)+(c+cc) for rr in range(3) for cc in range(3)])
-        givens2 = [row[:] for row in givens]
-        # set corners to 1..9 because they are irrelevant
-        for rr in range(3):
-            for cc in range(3):
-                n = 3*rr+cc+1 # (0..8) + 1
-                givens2[rr][cc] = givens2[12+rr][cc] = givens2[rr][12+cc] = givens2[12+rr][12+cc] = n
-        super().__init__(15*15,9,areas,sum(givens2,[]))
-    def toSol(self, satSol: List[int]) -> List[List[int]]:
-        superSol = super().toSol(satSol)
-        sol = [superSol[i:i+15] for i in range(0,15*15,15)]
-        # set corners to zeroes and return
-        for rr in range(3):
-            for cc in range(3):
-                sol[rr][cc] = sol[12+rr][cc] = sol[rr][12+cc] = sol[12+rr][12+cc] = 0
-        return sol
+        super().__init__(3,3,givens,[(0,3),(3,0),(3,3),(3,6),(6,3)])
 
-class SatPuzzleSudokuGattai8(SatPuzzleSudokuGeneral):
-    '''
-    8 standard overlapping sudokus in a particular arrangement
-    '''
+class SatPuzzleSudokuGattai8(SatPuzzleSudokuOverlap):
     def __init__(self, givens: List[List[int]]):
-        assert len(givens) == 21 and all(len(row) == 33 for row in givens)
-        areas = []
-        for r in chain(range(0,9),range(12,21)): # outer grid rows
-            areas.append(list(range(33*r+0,33*r+9)))
-            areas.append(list(range(33*r+12,33*r+21)))
-            areas.append(list(range(33*r+24,33*r+33)))
-        for r in range(6,15): # inner grid rows
-            areas.append(list(range(33*r+6,33*r+15)))
-            areas.append(list(range(33*r+18,33*r+27)))
-        for c in chain(range(0,9),chain(range(12,21),range(24,33))): # outer grid cols
-            areas.append(list(range(33*0+c,33*9+c,33)))
-            areas.append(list(range(33*12+c,33*21+c,33)))
-        for c in chain(range(6,15),range(18,27)): # inner grid cols
-            areas.append(list(range(33*6+c,33*15+c,33)))
-        for r in range(0,21,3): # all 3x3 blocks
-            for c in range(0,33,3):
-                areas.append([33*(r+rr)+(c+cc) for rr in range(3) for cc in range(3)])
-        givens2 = [row[:] for row in givens]
-        # set blank spaces to 1..9
-        blank_corners = [(0,9),(0,21),(3,9),(3,21),(9,0),(9,3),(9,15),(9,27),(9,30),(15,9),(15,21),(18,9),(18,21)]
-        for rr in range(3):
-            for cc in range(3):
-                n = 3*rr+cc+1
-                for r,c in blank_corners:
-                    givens2[r+rr][c+cc] = n
-        super().__init__(21*33,9,areas,sum(givens2,[]))
-    def toSol(self, satSol: List[int]) -> List[List[int]]:
-        superSol = super().toSol(satSol)
-        sol = [superSol[i:i+33] for i in range(0,21*33,33)]
-        blank_corners = [(0,9),(0,21),(3,9),(3,21),(9,0),(9,3),(9,15),(9,27),(9,30),(15,9),(15,21),(18,9),(18,21)]
-        for rr in range(3):
-            for cc in range(3):
-                for r,c in blank_corners:
-                    sol[r+rr][c+cc] = 0
-        return sol
+        super().__init__(3,3,givens,[(0,0),(0,12),(0,24),(6,6),(6,18),(12,0),(12,12),(12,24)])
 
 class SatPuzzleSudokuConsecutive(SatPuzzleLatinSquare):
     '''
@@ -449,44 +357,9 @@ class SatPuzzleSudokuMagicNumberX(SatPuzzleLatinSquareX):
                 result.append([-x(r1,c1,a),-x(r2,c2,b)])
         return result
 
-class SatPuzzleSudokuSamurai(SatPuzzleSudokuGeneral):
-    '''
-    5 standard sudokus overlapping in a '+' shape
-    '''
+class SatPuzzleSudokuSamurai(SatPuzzleSudokuOverlap):
     def __init__(self, givens: List[List[int]]):
-        # some parts of the area are ignored
-        assert len(givens) == 21 and all(len(row) == 21 for row in givens)
-        areas = []
-        for r in chain(range(0,9),range(12,21)): # top/bottom rows
-            areas.append(list(range(21*r+0,21*r+9)))
-            areas.append(list(range(21*r+12,21*r+21)))
-        for c in chain(range(0,9),range(12,21)): # left/right columns
-            areas.append(list(range(21*0+c,21*9+c,21)))
-            areas.append(list(range(21*12+c,21*21+c,21)))
-        for r in range(6,15): # middle rows
-            areas.append(list(range(21*r+6,21*r+15)))
-        for c in range(6,15): # middle columns
-            areas.append(list(range(21*6+c,21*15+c,21)))
-        for r in range(0,21,3): # all 3x3 blocks
-            for c in range(0,21,3):
-                areas.append([21*(r+rr)+(c+cc) for rr in range(3) for cc in range(3)])
-        givens2 = [row[:] for row in givens]
-        # set ignored parts to 1..9
-        for rr in range(3):
-            for cc in range(3):
-                n = 3*rr+cc+1
-                givens2[rr][9+cc] = givens2[3+rr][9+cc] = givens2[9+rr][cc] = givens2[9+rr][3+cc] = n
-                givens2[9+rr][15+cc] = givens2[9+rr][18+cc] = givens2[15+rr][9+cc] = givens2[18+rr][9+cc] = n
-        super().__init__(21*21,9,areas,sum(givens2,[]))
-    def toSol(self, satSol: List[int]) -> List[List[int]]:
-        superSol = super().toSol(satSol)
-        sol = [superSol[i:i+21] for i in range(0,21*21,21)]
-        # set corners to zeroes and return
-        for rr in range(3):
-            for cc in range(3):
-                sol[rr][9+cc] = sol[3+rr][9+cc] = sol[9+rr][cc] = sol[9+rr][3+cc] = 0
-                sol[9+rr][15+cc] = sol[9+rr][18+cc] = sol[15+rr][9+cc] = sol[18+rr][9+cc] = 0
-        return sol
+        super().__init__(3,3,givens,[(0,0),(0,12),(6,6),(12,0),(12,12)])
 
 class SatPuzzleSudokuOddEven(SatPuzzleSudokuStandard):
     '''
@@ -513,17 +386,15 @@ class SatPuzzleSudokuOddEvenSamurai(SatPuzzleSudokuSamurai):
         super().__init__(givens)
         assert len(odds) == 21 and all(len(row) == 21 for row in odds)
         self.odds = [row[:] for row in odds]
-        # have to set special odds for the unused parts of the samurai shape
-        for n in range(1,10,2):
-            rr,cc = divmod(n-1,3)
-            self.odds[rr][9+cc] = self.odds[3+rr][9+cc] = self.odds[9+rr][cc] = self.odds[9+rr][3+cc] = True
-            self.odds[9+rr][15+cc] = self.odds[9+rr][18+cc] = self.odds[15+rr][9+cc] = self.odds[18+rr][9+cc] = True
     def toCnf(self) -> List[List[int]]:
         result = super().toCnf()
         x = lambda r,c,n : 1 + (r*21+c)*9 + (n-1)
-        for r,row in enumerate(self.odds):
+        unused_blocks = set([(0,3),(1,3),(3,0),(3,1),(3,5),(3,6),(5,3),(6,3)])
+        for r,row in enumerate(self.odds): # constrain number parity in used blocks
             for c,odd in enumerate(row):
-                if odd: # cell must be odd
+                if (r//self.blockR,c//self.blockC) in unused_blocks:
+                    continue
+                elif odd: # cell must be odd
                     result.append([x(r,c,n) for n in range(1,10,2)])
                 else: # cell must be even
                     result.append([x(r,c,n) for n in range(2,10,2)])
@@ -572,84 +443,35 @@ class SatPuzzleSudokuMarginalSum(SatPuzzleSudokuStandard):
                     result.append([-x(i,N-bc+j,perm[j]) for j in range(bc)])
         return result
 
-class SatPuzzleSudokuShogun(SatPuzzleSudokuGeneral):
-    '''
-    11 standard overlapping sudokus in a particular arrangement
-    '''
+class SatPuzzleSudokuShogun(SatPuzzleSudokuOverlap):
     def __init__(self, givens: List[List[int]]):
-        assert len(givens) == 21 and all(len(row) == 45 for row in givens)
-        areas = []
-        for r in chain(range(0,9),range(12,21)): # outer grid rows
-            areas.append(list(range(45*r+0,45*r+9)))
-            areas.append(list(range(45*r+12,45*r+21)))
-            areas.append(list(range(45*r+24,45*r+33)))
-            areas.append(list(range(45*r+36,45*r+45)))
-        for r in range(6,15): # inner grid rows
-            areas.append(list(range(45*r+6,45*r+15)))
-            areas.append(list(range(45*r+18,45*r+27)))
-            areas.append(list(range(45*r+30,45*r+39)))
-        for c in chain(range(0,9),chain(range(12,21),chain(range(24,33),range(36,45)))): # outer grid cols
-            areas.append(list(range(45*0+c,45*9+c,45)))
-            areas.append(list(range(45*12+c,45*21+c,45)))
-        for c in chain(range(6,15),chain(range(18,27),range(30,39))): # inner grid cols
-            areas.append(list(range(45*6+c,45*15+c,45)))
-        for r in range(0,21,3): # all 3x3 blocks
-            for c in range(0,45,3):
-                areas.append([45*(r+rr)+(c+cc) for rr in range(3) for cc in range(3)])
-        givens2 = [row[:] for row in givens]
-        # set blank spaces to 1..9
-        blank_corners = [(0,9),(0,21),(0,33),(3,9),(3,21),(3,33),(9,0),(9,3),(9,15),(9,27),(9,39),(9,42),(15,9),(15,21),(15,33),(18,9),(18,21),(18,33)]
-        for rr in range(3):
-            for cc in range(3):
-                n = 3*rr+cc+1
-                for r,c in blank_corners:
-                    givens2[r+rr][c+cc] = n
-        super().__init__(21*45,9,areas,sum(givens2,[]))
-    def toSol(self, satSol: List[int]) -> List[List[int]]:
-        superSol = super().toSol(satSol)
-        sol = [superSol[i:i+45] for i in range(0,21*45,45)]
-        blank_corners = [(0,9),(0,21),(0,33),(3,9),(3,21),(3,33),(9,0),(9,3),(9,15),(9,27),(9,39),(9,42),(15,9),(15,21),(15,33),(18,9),(18,21),(18,33)]
-        for rr in range(3):
-            for cc in range(3):
-                for r,c in blank_corners:
-                    sol[r+rr][c+cc] = 0
-        return sol
+        super().__init__(3,3,givens,[(0,0),(0,12),(0,24),(0,36),(6,6),(6,18),(6,30),(12,0),(12,12),(12,24),(12,36)])
 
-class SatPuzzleSudokuSohei(SatPuzzleSudokuGeneral):
-    '''
-    4 standard overlapping sudokus in a particular arrangement
-    '''
+class SatPuzzleSudokuSohei(SatPuzzleSudokuOverlap):
     def __init__(self, givens: List[List[int]]):
-        assert len(givens) == 21 and all(len(row) == 21 for row in givens)
-        areas = []
-        for r in chain(range(0,9),range(12,21)): # top/bottom rows
-            areas.append(list(range(21*r+6,21*r+15)))
-        for r in range(6,15): # left/right rows
-            areas.append(list(range(21*r+0,21*r+9)))
-            areas.append(list(range(21*r+12,21*r+21)))
-        for c in chain(range(0,9),range(12,21)): # left/right rolumns
-            areas.append(list(range(21*6+c,21*15+c,21)))
-        for c in range(6,15): # top/bottom columns
-            areas.append(list(range(21*0+c,21*9+c,21)))
-            areas.append(list(range(21*12+c,21*21+c,21)))
-        for r in range(0,21,3): # 3x3 blocks
-            for c in range(0,21,3):
-                areas.append([21*(r+rr)+(c+cc) for rr in range(3) for cc in range(3)])
-        givens2 = [row[:] for row in givens]
-        # set blank spaces to 1..9
-        blank_corners = [(0,0),(0,3),(0,15),(0,18),(3,0),(3,3),(3,15),(3,18),(9,9),(15,0),(15,3),(15,15),(15,18),(18,0),(18,3),(18,15),(18,18)]
-        for rr in range(3):
-            for cc in range(3):
-                n = 3*rr+cc+1
-                for r,c in blank_corners:
-                    givens2[r+rr][c+cc] = n
-        super().__init__(21*21,9,areas,sum(givens2,[]))
-    def toSol(self, satSol: List[int]) -> List[List[int]]:
-        superSol = super().toSol(satSol)
-        sol = [superSol[i:i+21] for i in range(0,21*21,21)]
-        blank_corners = [(0,0),(0,3),(0,15),(0,18),(3,0),(3,3),(3,15),(3,18),(9,9),(15,0),(15,3),(15,15),(15,18),(18,0),(18,3),(18,15),(18,18)]
-        for rr in range(3):
-            for cc in range(3):
-                for r,c in blank_corners:
-                    sol[r+rr][c+cc] = 0
-        return sol
+        super().__init__(3,3,givens,[(0,6),(6,0),(6,12),(12,6)])
+
+class SatPuzzleSudokuSumo(SatPuzzleSudokuOverlap):
+    def __init__(self, givens: List[List[int]]):
+        super().__init__(3,3,givens,[(0,0),(0,12),(0,24),(6,6),(6,18),(12,0),(12,12),(12,24),(18,6),(18,18),(24,0),(24,12),(24,24)])
+
+class SatPuzzleSudokuWindmill(SatPuzzleSudokuOverlap):
+    def __init__(self, givens: List[List[int]]):
+        super().__init__(3,3,givens,[(0,3),(3,12),(6,6),(9,0),(12,9)])
+
+class SatPuzzleSudokuComparison(SatPuzzleSudokuStandard):
+    def __init__(self, blockR: int, blockC: int, relations: Set[Tuple[Tuple[int,int],Tuple[int,int]]]):
+        N = blockR*blockC
+        super().__init__(blockR,blockC,[[0]*(N) for _ in range(N)])
+        assert all(0 <= r1 < N and 0 <= c1 < N and 0 <= r2 < N and 0 <= c2 < N for (r1,c1),(r2,c2) in relations)
+        self.relations = set(p for p in relations)
+    def toCnf(self) -> List[List[int]]:
+        result = super().toCnf()
+        N = self.nums
+        x = lambda r,c,n : 1 + (r*N+c)*N + (n-1) # get variable number
+        for (r1,c1),(r2,c2) in self.relations:
+            # must have a not equal in invalid pairs (r1,c1) > (r2,c2)
+            for a in range(1,N+1):
+                for b in range(a+1,N+1):
+                    result.append([-x(r1,c1,b),-x(r2,c2,a)])
+        return result

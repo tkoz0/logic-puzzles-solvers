@@ -265,6 +265,48 @@ def _sudoku_sohei(data: Dict[str,Any]) -> Tuple[SatPuzzleBase,Any,str]:
     solver = SatPuzzleSudokuSohei(givens)
     return solver, solution, 'shogun'
 
+def _sudoku_sumo(data: Dict[str,Any]) -> Tuple[SatPuzzleBase,Any,str]:
+    givens = grid2numlist(data['problem'])
+    solution = grid2numlist(data['solution'])
+    solver = SatPuzzleSudokuSumo(givens)
+    return solver, solution, 'sumo'
+
+def _sudoku_windmill(data: Dict[str,Any]) -> Tuple[SatPuzzleBase,Any,str]:
+    givens = grid2numlist(data['problem'])
+    solution = grid2numlist(data['solution'])
+    solver = SatPuzzleSudokuWindmill(givens)
+    return solver, solution, 'windmill'
+
+def _sudoku_comparison(data: Dict[str,Any]) -> Tuple[SatPuzzleBase,Any,str]:
+    solution = grid2numlist(data['solution'])
+    try:
+        blockR,blockC = data['patterny'],data['patternx']
+    except:
+        assert data['size'] == 9
+        blockR,blockC = 3,3
+    N = blockR*blockC
+    relations = set()
+    for r in range(N):
+        for bc in range(blockR):
+            for i in range(blockC-1):
+                p1 = (r,bc*blockC+i)
+                p2 = (r,bc*blockC+i+1)
+                if solution[p1[0]][p1[1]] < solution[p2[0]][p2[1]]:
+                    relations.add((p1,p2))
+                else:
+                    relations.add((p2,p1))
+    for c in range(N):
+        for br in range(blockC):
+            for i in range(blockR-1):
+                p1 = (br*blockR+i,c)
+                p2 = (br*blockR+i+1,c)
+                if solution[p1[0]][p1[1]] < solution[p2[0]][p2[1]]:
+                    relations.add((p1,p2))
+                else:
+                    relations.add((p2,p1))
+    solver = SatPuzzleSudokuComparison(blockR,blockC,relations)
+    return solver, solution, f'{blockR}x{blockC}'
+
 # convert the data object to a solver object, provided solution, and category
 parsers: Dict[str,Callable[[Dict[str,Any]],Tuple[SatPuzzleBase,Any,str]]] = \
 {
@@ -286,7 +328,11 @@ parsers: Dict[str,Callable[[Dict[str,Any]],Tuple[SatPuzzleBase,Any,str]]] = \
     'Sudoku-Randsummen': _sudoku_marginalsum,
     'Sudoku_Randsummen': _sudoku_marginalsum,
     'Sudoku_Shogun': _sudoku_shogun,
-    'Sudoku_Sohei': _sudoku_sohei
+    'Sudoku_Sohei': _sudoku_sohei,
+    'Sudoku_Sumo': _sudoku_sumo,
+    'Sudoku_Windmill': _sudoku_windmill,
+    'Sudoku_Vergleich': _sudoku_comparison,
+    'Sudoku_Wolkenkratzer': _not_implemented
 }
 
 global_start = time.perf_counter()
