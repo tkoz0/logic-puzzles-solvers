@@ -242,6 +242,29 @@ def _sudoku_oddeven(data: Dict[str,Any]) -> Tuple[SatPuzzleBase,Any,str]:
         solver = SatPuzzleSudokuOddEven(blockR,blockC,givens,odds)
     return solver, solution, f'{len(givens)}'
 
+def _sudoku_marginalsum(data: Dict[str,Any]) -> Tuple[SatPuzzleBase,Any,str]:
+    blockR,blockC = data['patterny'],data['patternx']
+    N = blockR*blockC
+    solution = grid2numlist(data['solution'])
+    top = [sum(solution[r][c] for r in range(blockR)) for c in range(N)]
+    bottom = [sum(solution[r][c] for r in range(N-blockR,N)) for c in range(N)]
+    left = [sum(solution[r][c] for c in range(blockC)) for r in range(N)]
+    right = [sum(solution[r][c] for c in range(N-blockC,N)) for r in range(N)]
+    solver = SatPuzzleSudokuMarginalSum(blockR,blockC,top,bottom,left,right)
+    return solver, solution, f'{blockR}x{blockC}'
+
+def _sudoku_shogun(data: Dict[str,Any]) -> Tuple[SatPuzzleBase,Any,str]:
+    givens = grid2numlist(data['problem'])
+    solution = grid2numlist(data['solution'])
+    solver = SatPuzzleSudokuShogun(givens)
+    return solver, solution, 'shogun'
+
+def _sudoku_sohei(data: Dict[str,Any]) -> Tuple[SatPuzzleBase,Any,str]:
+    givens = grid2numlist(data['problem'])
+    solution = grid2numlist(data['solution'])
+    solver = SatPuzzleSudokuSohei(givens)
+    return solver, solution, 'shogun'
+
 # convert the data object to a solver object, provided solution, and category
 parsers: Dict[str,Callable[[Dict[str,Any]],Tuple[SatPuzzleBase,Any,str]]] = \
 {
@@ -259,7 +282,11 @@ parsers: Dict[str,Callable[[Dict[str,Any]],Tuple[SatPuzzleBase,Any,str]]] = \
     'Sudoku_Magic-Number': _sudoku_magicnumberx,
     'Sudoku-Odd-Even': _sudoku_oddeven,
     'Sudoku_Odd-Even': _sudoku_oddeven,
-    'Sudoku_Samurai': _sudoku_samurai
+    'Sudoku_Samurai': _sudoku_samurai,
+    'Sudoku-Randsummen': _sudoku_marginalsum,
+    'Sudoku_Randsummen': _sudoku_marginalsum,
+    'Sudoku_Shogun': _sudoku_shogun,
+    'Sudoku_Sohei': _sudoku_sohei
 }
 
 global_start = time.perf_counter()
