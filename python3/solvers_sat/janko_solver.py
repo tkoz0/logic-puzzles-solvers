@@ -307,6 +307,20 @@ def _sudoku_comparison(data: Dict[str,Any]) -> Tuple[SatPuzzleBase,Any,str]:
     solver = SatPuzzleSudokuComparison(blockR,blockC,relations)
     return solver, solution, f'{blockR}x{blockC}'
 
+def _suguru(data: Dict[str,Any]) -> Tuple[SatPuzzleBase,Any,str]:
+    givens = grid2numlist(data['problem'])
+    areas = grid2numlist(data['areas'])
+    solution = grid2numlist(data['solution'])
+    solver = SatPuzzleSuguruStandard(givens,areas)
+    return solver, solution, f'{len(givens)}x{len(givens[0])}'
+
+def _hakyuu(data: Dict[str,Any]) -> Tuple[SatPuzzleBase,Any,str]:
+    givens = grid2numlist(data['problem'])
+    areas = grid2numlist(data['areas'])
+    solution = grid2numlist(data['solution'])
+    solver = SatPuzzleHakyuu(givens,areas)
+    return solver, solution, f'{len(givens)}x{len(givens[0])}'
+
 # convert the data object to a solver object, provided solution, and category
 parsers: Dict[str,Callable[[Dict[str,Any]],Tuple[SatPuzzleBase,Any,str]]] = \
 {
@@ -332,32 +346,46 @@ parsers: Dict[str,Callable[[Dict[str,Any]],Tuple[SatPuzzleBase,Any,str]]] = \
     'Sudoku_Sumo': _sudoku_sumo,
     'Sudoku_Windmill': _sudoku_windmill,
     'Sudoku_Vergleich': _sudoku_comparison,
-    'Sudoku_Wolkenkratzer': _not_implemented
+    'Sudoku_Wolkenkratzer': _not_implemented,
+    'Suguru': _suguru,
+    'Hakyuu': _hakyuu
+}
+
+# puzzles to skip due to issues that make them not work with the main solver
+skip_puzzles: Dict[str,str] = \
+{
+    '/Hakyuu/469.a.x-janko': 'no solution provided'
 }
 
 global_start = time.perf_counter()
 category2nums: Dict[str,List[int]] = dict()
+skip_count = 0
 i = 0
 sys.stderr.write('\n')
 for object in tqdm(objects):
     i += 1
     object_file = object['file']
-    tqdm.write(f'processing object {i} = {object_file}')
-    try:
-        solver,solution,category = parsers[puzzle_dir](object['data'])
-        if category not in category2nums:
-            category2nums[category] = []
-        category2nums[category].append(i)
-        check_solution(solver,solution,category)
-    except Exception as e:
-        sys.stderr.write(f'{json.dumps(object,indent=4)}\n')
-        sys.stderr.write(f'ERROR ON THIS OBJECT = {type(e)}: {e}\n')
-        traceback.print_exc()
-        quit()
+    if object_file in skip_puzzles:
+        tqdm.write(f'SKIPPING OBJECT {i} = {object_file}')
+        tqdm.write(f'reason = {skip_puzzles[object_file]}')
+        skip_count += 1
+    else:
+        tqdm.write(f'processing object {i} = {object_file}')
+        try:
+            solver,solution,category = parsers[puzzle_dir](object['data'])
+            if category not in category2nums:
+                category2nums[category] = []
+            category2nums[category].append(i)
+            check_solution(solver,solution,category)
+        except Exception as e:
+            sys.stderr.write(f'{json.dumps(object,indent=4)}\n')
+            sys.stderr.write(f'ERROR ON THIS OBJECT = {type(e)}: {e}\n')
+            traceback.print_exc()
+            quit()
     tqdm.write('')
 global_time = time.perf_counter()-global_start
 sys.stderr.write('\n')
-sys.stderr.write(f'solved {len(objects)} puzzles in {global_time} seconds\n')
+sys.stderr.write(f'solved {len(objects)-skip_count} puzzles in {global_time} seconds\n')
 sys.stderr.write(f'average solving time is {global_time/len(objects)} seconds\n')
 sys.stderr.write('\n')
 
@@ -368,5 +396,6 @@ for category in solving_times:
     sys.stderr.write(f'min = {min(times)}\n')
     sys.stderr.write(f'max = {max(times)}\n')
     sys.stderr.write(f'avg = {sum(times)/len(times)}\n')
-    sys.stderr.write(f'stddev = {stdev(times)}\n')
+    if len(times) >= 2:
+        sys.stderr.write(f'stddev = {stdev(times)}\n')
     sys.stderr.write('\n')

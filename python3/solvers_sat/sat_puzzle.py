@@ -1,6 +1,6 @@
 from itertools import chain
 import pycosat
-from typing import Any, Generator, Iterator, List, Set, Tuple
+from typing import Any, Dict, Generator, Iterator, List, Set, Tuple
 
 class SatPuzzleBase:
     def toCnf(self) -> List[List[int]]:
@@ -76,6 +76,64 @@ class SatPuzzleSudokuGeneral(SatPuzzleBase):
             assert result[c] == 0 # only 1 value assigned to a cell
             result[c] = n
         assert all(n > 0 for n in result) # every cell has a value
+        return result
+
+class SatPuzzleSuguruGeneral(SatPuzzleBase):
+    '''
+    Generalization of suguru
+    - division of grid into areas
+    - each area of size N contais 1..N
+    '''
+    def __init__(self, cells: int, areas: List[int], givens: List[int]):
+        assert cells > 0
+        assert len(areas) == cells
+        assert len(givens) == cells
+        area_symbols = set(areas)
+        areas_dict: Dict[int,List[int]] = dict() # map symbol to list of cell indexes
+        for symb in area_symbols:
+            areas_dict[symb] = [i for i,a in enumerate(areas) if a == symb]
+        assert all(0 <= n <= len(areas_dict[areas[i]]) for i,n in enumerate(givens))
+        self.cells = cells
+        self.areas = areas[:]
+        self.areasmap = areas_dict
+        self.givens = givens[:]
+        # variable map for CNF conversion (i,n) -> var (i = cell num)
+        self.varmap: Dict[Tuple[int,int],int] = dict()
+        self.varmaprev: Dict[int,Tuple[int,int]] = dict() # reverse of above
+        last_var = 0 # last variable number used in the next loop
+        for i,area in enumerate(areas):
+            area_size = len(self.areasmap[area])
+            for n in range(1,area_size+1):
+                self.varmap[(i,n)] = last_var+n
+                self.varmaprev[last_var+n] = (i,n)
+            last_var += area_size
+    def toCnf(self) -> List[List[int]]:
+        result: List[List[int]] = []
+        for c in range(self.cells): # each cell
+            area_size = len(self.areasmap[self.areas[c]])
+            result.append([self.varmap[(c,n)] for n in range(1,area_size+1)]) # has a value
+            for n1 in range(1,area_size+1): # and it is unique
+                for n2 in range(n1+1,area_size+1):
+                    result.append([-self.varmap[(c,n1)],-self.varmap[(c,n2)]])
+        for area in self.areasmap: # each area
+            cells = self.areasmap[area]
+            area_size = len(cells)
+            for n in range(1,area_size+1): # has each number
+                result.append([self.varmap[(c,n)] for c in cells])
+                for i,c1 in enumerate(cells): # that number is in a unique cell
+                    for c2 in cells[i+1:]:
+                        result.append([-self.varmap[(c1,n)],-self.varmap[(c2,n)]])
+            for c,n in enumerate(self.givens): # use clues
+                if n != 0:
+                    result.append([self.varmap[(c,n)]])
+        return result
+    def toSol(self, satSol: List[int]) -> List[int]:
+        result = [0]*self.cells
+        for v in filter(lambda x : x > 0, satSol):
+            c,n = self.varmaprev[v]
+            assert result[c] == 0 # only 1 value assigned to a cell
+            result[c] = n
+        assert all(n > 0 for n in result)
         return result
 
 class SatPuzzleLatinSquare(SatPuzzleSudokuGeneral):
@@ -475,3 +533,74 @@ class SatPuzzleSudokuComparison(SatPuzzleSudokuStandard):
                 for b in range(a+1,N+1):
                     result.append([-x(r1,c1,b),-x(r2,c2,a)])
         return result
+
+class SatPuzzleSuguruStandard(SatPuzzleSuguruGeneral):
+    def __init__(self, givens: List[List[int]], areas: List[List[int]]):
+        R = len(givens)
+        C = len(givens[0])
+        self.rows = R
+        self.cols = C
+        assert R > 0 and C > 0
+        assert all(len(row) == C for row in givens)
+        assert len(areas) == R and all(len(row) == C for row in areas)
+        super().__init__(R*C,sum(areas,[]),sum(givens,[]))
+    def toCnf(self) -> List[List[int]]:
+        result = super().toCnf()
+        for r in range(self.rows):
+            for c in range(self.cols):
+                # for the 8 cells around it
+                for dr in range(-1,2):
+                    for dc in range(-1,2):
+                        if dr == 0 and dc == 0:
+                            continue
+                        rr,cc = r+dr,c+dc
+                        if rr < 0 or rr >= self.rows or cc < 0 or cc >= self.cols:
+                            continue # off grid
+                        i1 = r*self.cols+c
+                        i2 = rr*self.cols+cc
+                        area1 = self.areas[i1]
+                        area2 = self.areas[i2]
+                        area1size = len(self.areasmap[area1])
+                        area2size = len(self.areasmap[area2])
+                        # n at (r,c) implies n not at at (rr,cc)
+                        for n in range(1,min(area1size+1,area2size+1)):
+                            result.append([-self.varmap[(i1,n)],-self.varmap[(i2,n)]])
+        return result
+    def toSol(self, satSol: List[int]) -> List[List[int]]:
+        sol = super().toSol(satSol)
+        return [sol[i:i+self.cols] for i in range(0,self.rows*self.cols,self.cols)]
+
+class SatPuzzleHakyuu(SatPuzzleSuguruGeneral):
+    def __init__(self, givens: List[List[int]], areas: List[List[int]]):
+        R = len(givens)
+        C = len(givens[0])
+        self.rows = R
+        self.cols = C
+        assert R > 0 and C > 0
+        assert all(len(row) == C for row in givens)
+        assert len(areas) == R and all(len(row) == C for row in areas)
+        super().__init__(R*C,sum(areas,[]),sum(givens,[]))
+    def toCnf(self) -> List[List[int]]:
+        result = super().toCnf()
+        for r in range(self.rows):
+            for c in range(self.cols):
+                # n at (r,c) implies n not within n cells in orthogonal directions
+                i1 = r*self.cols+c
+                area1 = self.areas[i1]
+                area1size = len(self.areasmap[area1])
+                for n in range(1,area1size+1):
+                    for d in range(1,n+1): # distance from r,c
+                        for rr,cc in [(r+d,c),(r-d,c),(r,c+d),(r,c-d)]:
+                            if rr < 0 or rr >= self.rows or cc < 0 or cc >= self.cols:
+                                continue # off grid
+                            i2 = rr*self.cols+cc
+                            area2 = self.areas[i2]
+                            area2size = len(self.areasmap[area2])
+                            if n <= area2size: # n at (r,c) implies n not at (rr,cc)
+                                result.append([-self.varmap[i1,n],-self.varmap[i2,n]])
+        return result
+    def toSol(self, satSol: List[int]) -> List[List[int]]:
+        sol = super().toSol(satSol)
+        return [sol[i:i+self.cols] for i in range(0,self.rows*self.cols,self.cols)]
+
+# TODO better documentation for all puzzle types
