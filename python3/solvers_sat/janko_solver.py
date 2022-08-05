@@ -143,7 +143,7 @@ def _sudoku_clueless2(data: Dict[str,Any]) -> Tuple[SatPuzzleBase,Any,str]:
     givens = grid2numlist(data['problem'])
     solution = grid2numlist(data['solution'])
     solver = SatPuzzleSudokuClueless2(givens)
-    return solver, solution, 'clueless1'
+    return solver, solution, 'clueless2'
 
 def _sudoku_flower(data: Dict[str,Any]) -> Tuple[SatPuzzleBase,Any,str]:
     givens = grid2numlist(data['problem'])
@@ -321,6 +321,16 @@ def _hakyuu(data: Dict[str,Any]) -> Tuple[SatPuzzleBase,Any,str]:
     solver = SatPuzzleHakyuu(givens,areas)
     return solver, solution, f'{len(givens)}x{len(givens[0])}'
 
+def _sukaku(data: Dict[str,Any]) -> Tuple[SatPuzzleBase,Any,str]:
+    candidates = list(map(lambda row : list(map(lambda x : [int(d) for d in x], row)), data['problem']))
+    solution = grid2numlist(data['solution'])
+    if 'areas' in data:
+        areas = grid2numlist(data['areas'])
+        solver = SatPuzzleSukakuJigsaw(areas,candidates)
+    else:
+        solver = SatPuzzleSukaku(3,3,candidates) # assume all are standard 9x9 size
+    return solver, solution, f'3x3'
+
 # convert the data object to a solver object, provided solution, and category
 parsers: Dict[str,Callable[[Dict[str,Any]],Tuple[SatPuzzleBase,Any,str]]] = \
 {
@@ -348,7 +358,8 @@ parsers: Dict[str,Callable[[Dict[str,Any]],Tuple[SatPuzzleBase,Any,str]]] = \
     'Sudoku_Vergleich': _sudoku_comparison,
     'Sudoku_Wolkenkratzer': _not_implemented,
     'Suguru': _suguru,
-    'Hakyuu': _hakyuu
+    'Hakyuu': _hakyuu,
+    'Sukaku': _sukaku
 }
 
 # puzzles to skip due to issues that make them not work with the main solver
