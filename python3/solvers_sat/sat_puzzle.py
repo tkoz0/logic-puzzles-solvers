@@ -3,33 +3,69 @@ import pycosat
 from typing import Any, Dict, Generator, Iterator, List, Set, Tuple
 
 class SatPuzzleBase:
+    '''
+    Base class for a puzzle to SAT reducer. Must override the following:
+    - toCnf: convert a puzzle instance to a CNF SAT instance
+    - toSol: convert the solution to the SAT problem back to the puzzle solution
+    The other functions extend the functionality of these and should not need to
+    be overridden by subclasses.
+    '''
     def toCnf(self) -> List[List[int]]:
+        '''
+        Convert puzzle to a CNF logic expression. The return value is a list of
+        clauses similar to the DIMACS CNF format. Each clause is a list of
+        nonzero integers (+n for variable n and -n for the negation of variable
+        n). The value 0 should not be included, it is simply the clause
+        terminator for the DIMACS CNF format and is not necessary for this list
+        of lists representation.
+        '''
         assert 0, 'not implemented'
         return []
     def toSol(self, satSol: List[int]) -> Any:
+        '''
+        Convert a solution to the CNF SAT instance into a puzzle solution. The
+        type returned should be determined by the subclass.
+        '''
         assert 0, 'not implemented'
     def cnfSolve(self) -> List[int]:
+        '''
+        Solves the CNF problem returned by self.toCnf(). Currently, pycosat
+        (Python3 package for PicoSAT) is used. The return value is a list of
+        nonzero integers (+n for n true and -n for n false), or the empty list
+        if no solution is found.
+        '''
         result = pycosat.solve(self.toCnf())
         assert result != 'UNKNOWN'
         return [] if result == 'UNSAT' else result
     def cnfSolveAll(self) -> Iterator[List[int]]:
+        '''
+        Finds all solutions to the CNF problem, returning an iterator of them.
+        '''
         return pycosat.itersolve(self.toCnf())
     def solve(self) -> Any:
+        '''
+        Finds a solution to the logic puzzle. Currently, an exception should
+        occur if no solution is found.
+        '''
         return self.toSol(self.cnfSolve())
     def solveAll(self) -> Iterator[Any]:
+        '''
+        Returns an iterator of all solutions to the logic puzzle.
+        '''
         return map(self.toSol,self.cnfSolveAll())
 
 class SatPuzzleSudokuGeneral(SatPuzzleBase):
     '''
-    Generalization of sudoku
-    Puzzle is defined by some number of cells, a positive integer N, and areas
-    (set of N cells) which must contain 1,2,..,N each exactly once.
+    A generalization of Sudoku, representing a puzzle as C > 0 cells (numbered
+    0, 1, ..., C-1), a parameter N > 0, and sets of N cells (areas) which are
+    constrained to contain the numbers 1, 2, ..., N, each exactly once.
     '''
     def __init__(self, cells: int, nums: int, areas: List[List[int]], givens: List[int]):
         '''
         cells = number of cells, numbered starting from 0
-        nums = symbols in puzzle, 1, 2, .., N
+        nums = symbols in puzzle, represented as 1, 2, .., N
         areas = list of cells constrained to contain 1..N, each of size N
+        givens = list of values given, 0 for no given value
         '''
         assert cells > 0
         assert nums > 0
@@ -42,12 +78,20 @@ class SatPuzzleSudokuGeneral(SatPuzzleBase):
         self.givens = givens[:]
     def toCnf(self) -> List[List[int]]:
         '''
-        variables: x_{c,n} (0 <= c < cells, 1 <= n <= nums)
+        variables: x(c,n) (0 <= c < cells, 1 <= n <= N)
         constraints:
-        - each cell has >= 1 value
-        - each cell has <= 1 value
-        - each area contains each number
+        - each cell (c) has >= 1 value
+          - x(c,1) or x(c,2) or ... or x(c,n)
+        - each cell (c) has <= 1 value
+          - express as for any pair, either number is not assigned to cell c
+          - not x(c,a) or not x(c,b) (for 1 <= a < b <= N)
+        - each area (cells a1,a2,..,aN) contains each number
+          - x(a1,i) or x(a2,i) or ... or x(an,i) (for 1 <= i <= N)
+        - each area (cells a1,a2,..,aN)) does not have a duplicate (redundant,
+          necessary for efficiency) (for any 2 cells, either does not have n)
+          - not x(a_i,n) or not x(a_j,n) (for each 1 <= n <= N and 1 <= i < j <= N)
         - use the given clues
+          - x(c,i) (for each cell c with a given value i)
         '''
         result: List[List[int]] = []
         x = lambda c,n : 1 + c*self.nums + (n-1)
@@ -61,7 +105,7 @@ class SatPuzzleSudokuGeneral(SatPuzzleBase):
             for n in range(1,self.nums+1): # has each number
                 result.append([x(c,n) for c in area])
                 # add redundant clauses for efficiency
-                for i,c1 in enumerate(area): # for any 2 cells, one does not have n ()
+                for i,c1 in enumerate(area): # for any 2 cells, one does not have n (no duplicated numbers in an area)
                     for c2 in area[i+1:]:
                         result.append([-x(c1,n),-x(c2,n)])
         for c,n in enumerate(self.givens): # use the given clues
@@ -80,11 +124,16 @@ class SatPuzzleSudokuGeneral(SatPuzzleBase):
 
 class SatPuzzleSuguruGeneral(SatPuzzleBase):
     '''
-    Generalization of suguru
-    - division of grid into areas
-    - each area of size N contais 1..N
+    A generalization of of Suguru similar to the generalization of Sudoku. There
+    are C > 0 cells divided into areas (specified by a number unique to each
+    area). Each area (of size N) must have the numbers 1, 2, ..., N.
     '''
     def __init__(self, cells: int, areas: List[int], givens: List[int]):
+        '''
+        cells = number of cells, numbered from 0
+        areas = list of area numbers assigned to each cell
+        givens = list of given values, 0 for no value given
+        '''
         assert cells > 0
         assert len(areas) == cells
         assert len(givens) == cells
@@ -108,6 +157,10 @@ class SatPuzzleSuguruGeneral(SatPuzzleBase):
                 self.varmaprev[last_var+n] = (i,n)
             last_var += area_size
     def toCnf(self) -> List[List[int]]:
+        '''
+        These look very similar to the Sudoku clauses, except the area size and
+        amount of possible numbers is constrained by area sizes.
+        '''
         result: List[List[int]] = []
         for c in range(self.cells): # each cell
             area_size = len(self.areasmap[self.areas[c]])
@@ -120,7 +173,7 @@ class SatPuzzleSuguruGeneral(SatPuzzleBase):
             area_size = len(cells)
             for n in range(1,area_size+1): # has each number
                 result.append([self.varmap[(c,n)] for c in cells])
-                for i,c1 in enumerate(cells): # that number is in a unique cell
+                for i,c1 in enumerate(cells): # that number is in a unique cell (redundant)
                     for c2 in cells[i+1:]:
                         result.append([-self.varmap[(c1,n)],-self.varmap[(c2,n)]])
             for c,n in enumerate(self.givens): # use clues
@@ -138,10 +191,15 @@ class SatPuzzleSuguruGeneral(SatPuzzleBase):
 
 class SatPuzzleLatinSquare(SatPuzzleSudokuGeneral):
     '''
+    An N x N grid requiring 1,2,...,N in each row/column. Similar to normal
+    Sudoku but without the sub blocks.
     Square grid of side length N
     - each row/col must contain 1,2,..,N
     '''
     def __init__(self, givens: List[List[int]]):
+        '''
+        givens = N x N grid of given numbers, 0 for no value given
+        '''
         N = len(givens)
         assert N > 0
         assert len(givens) == N and all(len(row) == N for row in givens) and all(0 <= n <= N for n in sum(givens,[]))
@@ -157,9 +215,12 @@ class SatPuzzleLatinSquare(SatPuzzleSudokuGeneral):
 
 class SatPuzzleLatinSquareX(SatPuzzleLatinSquare):
     '''
-    Latin square with diagonals
+    Latin Square also requiring the diagonals to contain each number once.
     '''
     def __init__(self, givens: List[List[int]]):
+        '''
+        givens = N x N grid of given numbers, 0 for no value given
+        '''
         N = len(givens)
         super().__init__(givens)
         self.areas.append(list(range(0,N*N,N+1)))
@@ -167,9 +228,14 @@ class SatPuzzleLatinSquareX(SatPuzzleLatinSquare):
 
 class SatPuzzleSudokuStandard(SatPuzzleLatinSquare):
     '''
-    Extends latin square by adding rectangular blocks
+    Standard Sudoku is a Latin Square with rectangular sub blocks.
     '''
     def __init__(self, blockR: int, blockC: int, givens: List[List[int]]):
+        '''
+        blockR = number of rows in each sub block
+        blockC = number of columns in each sub block
+        givens = N x N grid of given numbers, 0 for no given (N = blockR*blockC)
+        '''
         assert blockR > 0 and blockC > 0
         N = blockR*blockC
         assert len(givens) == N
@@ -182,9 +248,14 @@ class SatPuzzleSudokuStandard(SatPuzzleLatinSquare):
 
 class SatPuzzleSudokuX(SatPuzzleSudokuStandard):
     '''
-    Also requires the main diagonals to contain 1,2,..,N
+    Standard Sudoku also requiring the diagonals to contain each number once.
     '''
     def __init__(self, blockR: int, blockC: int, givens: List[List[int]]):
+        '''
+        blockR = number of rows in each sub block
+        blockC = number of columns in each sub block
+        givens = N x N grid of given numbers, 0 for no given (N = blockR*blockC)
+        '''
         super().__init__(blockR,blockC,givens)
         N = blockR*blockC
         self.areas.append(list(range(0,N*N,N+1)))
@@ -192,9 +263,13 @@ class SatPuzzleSudokuX(SatPuzzleSudokuStandard):
 
 class SatPuzzleSudokuJigsaw(SatPuzzleLatinSquare):
     '''
-    Divides grid into (irregular) areas
+    Sudoku with irregularly shaped areas.
     '''
     def __init__(self, givens: List[List[int]], areas: List[List[int]]):
+        '''
+        givens = N x N grid of given numbers, 0 for no given
+        areas = N x N grid of area assigned to each number (each area is a unique integer)
+        '''
         N = len(givens)
         assert N > 0
         assert len(areas) == N
@@ -208,6 +283,10 @@ class SatPuzzleSudokuJigsawX(SatPuzzleSudokuJigsaw):
     Jigsaw sudoku with main diagonals
     '''
     def __init__(self, givens: List[List[int]], areas: List[List[int]]):
+        '''
+        givens = N x N grid of given numbers, 0 for no given
+        areas = N x N grid of area assigned to each number (each area is a unique integer)
+        '''
         super().__init__(givens,areas)
         N = len(givens)
         self.areas.append(list(range(0,N*N,N+1)))
@@ -215,10 +294,17 @@ class SatPuzzleSudokuJigsawX(SatPuzzleSudokuJigsaw):
 
 class SatPuzzleSudokuOverlap(SatPuzzleSudokuGeneral):
     '''
-    Generalization of sudoku variants that overlap standard puzzles
-    - specify list of top left corners using block coordinates
+    A generalization of Sudoku variants that overlap several standard sudoku
+    grids overlapping on rectangular sub blocks.
     '''
     def __init__(self, blockR: int, blockC: int, givens: List[List[int]], corners: List[Tuple[int,int]]):
+        '''
+        blockR = number of rows in each sub block
+        blockC = number of columns in each sub block
+        givens = grid of given values, 0 for no value, should have 0 in unused areas
+        corners = list of (r,c) positions (with (0,0) being the top left)
+            representing the top left corners of the standard sudoku puzzles
+        '''
         N = blockR*blockC
         assert all(pr%blockR == 0 and pc%blockC == 0 for pr,pc in corners)
         brows = max(p[0] for p in corners)//blockR + blockC
@@ -267,35 +353,45 @@ class SatPuzzleSudokuOverlap(SatPuzzleSudokuGeneral):
         return gridSol
 
 class SatPuzzleSudokuButterfly(SatPuzzleSudokuOverlap):
+    '''
+    Overlapped standard (size 9x9) Sudokus in the following arrangement:
+        ABXX
+        CDXX
+        XXXX
+        XXXX
+    Each letter is a sub block and ABCD ore the top left corners of the standard Sudokus.
+    This class only supports 3x3 sub blocks.
+    '''
     def __init__(self, givens: List[List[int]]):
+        '''
+        givens = 12x12 grid
+        '''
         super().__init__(3,3,givens,[(0,0),(0,3),(3,0),(3,3)])
 
-class SatPuzzleSudokuCluelessBase(SatPuzzleSudokuGeneral):
+class SatPuzzleSudokuCluelessBase(SatPuzzleSudokuOverlap):
     '''
-    Shared part of the clueless sudoku types (9 non overlapping standard grids)
+    Shared part of the Clueless Sudoku types (9 non overlapping standard grids)
+    AXXBXXCXX
+    XXXXXXXXX
+    XXXXXXXXX
+    DXXEXXFXX
+    XXXXXXXXX
+    XXXXXXXXX
+    GXXHXXIXX
+    XXXXXXXXX
+    XXXXXXXXX
+    Each letter is a sub block and ABCDEFGHI are the top left corners of the standard Sudokus.
+    This class only supports 3x3 sub blocks.
     '''
     def __init__(self, givens: List[List[int]]):
-        assert len(givens) == 27 and all(len(row) == 27 for row in givens)
-        areas = []
-        for r in range(27):
-            areas.append(list(range(27*r+0,27*r+9))) # left
-            areas.append(list(range(27*r+9,27*r+18))) # middle
-            areas.append(list(range(27*r+18,27*r+27))) # right
-        for c in range(27):
-            areas.append(list(range(0*27+c,9*27,27))) # top
-            areas.append(list(range(9*27+c,18*27,27))) # middle
-            areas.append(list(range(18*27+c,27*27,27))) # botto
-        for r in range(0,27,3): # blocks
-            for c in range(0,27,3):
-                areas.append([27*(r+rr)+(c+cc) for rr in range(3) for cc in range(3)])
-        super().__init__(27*27,9,areas,sum(givens,[]))
-    def toSol(self, satSol: List[int]) -> List[List[int]]:
-        sol = super().toSol(satSol)
-        return [sol[i:i+27] for i in range(0,27*27,27)]
+        '''
+        givens = 27x27 grid
+        '''
+        super().__init__(3,3,givens,[(0,0),(0,9),(0,18),(9,0),(9,9),(9,18),(18,0),(18,9),(18,18)])
 
 class SatPuzzleSudokuClueless1(SatPuzzleSudokuCluelessBase):
     '''
-    Special grid is the center of the 81 sub blocks
+    The 10th grid is made of the centers of the 81 sub blocks.
     '''
     def __init__(self, givens: List[List[int]]):
         super().__init__(givens)
@@ -309,7 +405,7 @@ class SatPuzzleSudokuClueless1(SatPuzzleSudokuCluelessBase):
 
 class SatPuzzleSudokuClueless2(SatPuzzleSudokuCluelessBase):
     '''
-    Special grid is the center blocks of each grid
+    The 10th grid is made of the center blocks of each sub puzzle.
     '''
     def __init__(self, givens: List[List[int]]):
         super().__init__(givens)
@@ -320,24 +416,68 @@ class SatPuzzleSudokuClueless2(SatPuzzleSudokuCluelessBase):
         # blocks are redundant since they are part of other sub puzzles
 
 class SatPuzzleSudokuFlower(SatPuzzleSudokuOverlap):
+    '''
+    Overlapped standard (size 9x9) Sudokus in the following arrangement:
+         AXX
+        BXCXX
+        XDXXX
+        XXXXX
+         XXX
+    Each letter is a sub block and ABCD are the top left corners of the standard Sudokus.
+    This class only supports 3x3 sub blocks.
+    '''
     def __init__(self, givens: List[List[int]]):
+        '''
+        givens = 15x15 grid
+        '''
         super().__init__(3,3,givens,[(0,3),(3,0),(3,3),(3,6),(6,3)])
 
 class SatPuzzleSudokuGattai8(SatPuzzleSudokuOverlap):
+    '''
+    Overlapped standard (size 9x9) Sudokus in the following arrangement:
+        AXX BXX CXX
+        XXX XXX XXX
+        XXDXXXEXXXX
+          XXX XXX
+        FXXXGXXXHXX
+        XXX XXX XXX
+        XXX XXX XXX
+    Each letter is a sub block and ABCDEFGH are the top left corners of the standard Sudokus.
+    This class only supports 3x3 sub blocks.
+    '''
     def __init__(self, givens: List[List[int]]):
+        '''
+        givens = 21x33 grid
+        '''
         super().__init__(3,3,givens,[(0,0),(0,12),(0,24),(6,6),(6,18),(12,0),(12,12),(12,24)])
 
 class SatPuzzleSudokuConsecutive(SatPuzzleLatinSquare):
     '''
-    Latin square with markings for orthogonally adjacent cells having consecutive values
-    - consecutive pairs are specified as a set of coordinate pairs which must only be orthogonally adjacent
+    Latin Square with edge markings for orthogonally adjacent cells that must
+    have consecutive values. This does not have sub blocks like normal Sudoku.
     '''
     def __init__(self, givens: List[List[int]], consec_pairs: Set[Tuple[Tuple[int,int],Tuple[int,int]]]):
+        '''
+        givens = N x N grid of given numbers
+        consec_pairs = list of (r1,c1),(r2,c2) specifying 2 cells that must have consecutive values
+            these should only be orthogonally adjacent
+        '''
         N = len(givens)
         super().__init__(givens)
         assert all(0 <= r1 < N and 0 <= c1 < N and 0 <= r2 < N and 0 <= c2 < N for (r1,c1),(r2,c2) in consec_pairs)
         self.consec_pairs = set(p for p in consec_pairs)
     def toCnf(self) -> List[List[int]]: # extend to add extra constraints
+        '''
+        Add constraints for orthogonally adjacent cells
+        Let c1,c2 be the cells and x(c,n) mean the variable for n assigned to
+        cell c. The possible assignments are 2 distinct values to these cells.
+        If we constrain the values to be consecutive, then we add the clauses:
+        - not x(c1,a) or not x(c2,b) (for each non consecutive pair a,b)
+        If c1,c2 are assigned consecutive values, then all these clauses will be
+        true. Otherwise, one of them will be false. For requiring 2 cells to be
+        non consecutive, use clauses of the same form for consecutive pairs a,b.
+        The reasoning is similar.
+        '''
         result = super().toCnf()
         N = self.nums
         x = lambda r,c,n : 1 + (r*N+c)*N + (n-1) # get variable number
@@ -357,12 +497,17 @@ class SatPuzzleSudokuConsecutive(SatPuzzleLatinSquare):
 
 class SatPuzzleSudokuKropki(SatPuzzleSudokuStandard):
     '''
-    Blank standard sudoku grid with
-    - white circle means adjacent values must be consecutive
-    - black circle means one of the value is double of the other
-    - adjacent cells without a circle must be neither
+    Standard Sudoku with some circles on the edges. White circles mean the 2
+    values must be consecutive. Black circles mean one value is double of the
+    other. No circle means the numbers are neither.
     '''
     def __init__(self, blockR: int, blockC, white: Set[Tuple[Tuple[int,int],Tuple[int,int]]], black: Set[Tuple[Tuple[int,int],Tuple[int,int]]]):
+        '''
+        blockR = rows per sub block
+        blockC = cols per sub block
+        white = set of (r1,c1),(r2,c2) cell pairs with a white circle
+        black = set of (r1,c1),(r2,c2) cell pairs with a black circle
+        '''
         N = blockR*blockC
         super().__init__(blockR,blockC,[[0]*N for _ in range(N)])
         assert all(0 <= r1 < N and 0 <= c1 < N and 0 <= r2 < N and 0 <= c2 < N for (r1,c1),(r2,c2) in white)
@@ -371,6 +516,12 @@ class SatPuzzleSudokuKropki(SatPuzzleSudokuStandard):
         self.white = set(p for p in white)
         self.black = set(p for p in black)
     def toCnf(self) -> List[List[int]]: # extend to add extra constraints
+        '''
+        These constraints are handled similarly to those in Consecutive Sudoku.
+        For each pair of cells c1,c2 and each pair a,b of (distinct) cell values
+        that are not allowed in these 2 cells, add the clause:
+        - not x(c1,a) or not x(c2,b)
+        '''
         result = super().toCnf()
         N = self.nums
         x = lambda r,c,n : 1 + (r*N+c)*N + (n-1) # get variable number
@@ -397,15 +548,26 @@ class SatPuzzleSudokuKropki(SatPuzzleSudokuStandard):
 
 class SatPuzzleSudokuMagicNumberX(SatPuzzleLatinSquareX):
     '''
-    Variant where lines between cells indicate that the 2 must sum to the given magic number
+    Latin Square with thick lines between cells indicating they must sum to the
+    given magic number.
     '''
     def __init__(self, givens: List[List[int]], magic: int, pairs: Set[Tuple[Tuple[int,int],Tuple[int,int]]]):
+        '''
+        givens = N x N grid of given values, 0 for no given value
+        magic = magic number
+        pairs = set of (r1,c1),(r2,c2) cell pairs that must sum to magic number
+        '''
         N = len(givens)
         super().__init__(givens)
         self.magic = magic
         assert all(0 <= r1 < N and 0 <= c1 < N and 0 <= r2 < N and 0 <= c2 < N for (r1,c1),(r2,c2) in pairs)
         self.pairs = set(p for p in pairs)
     def toCnf(self) -> List[List[int]]:
+        '''
+        Add constraints for orthogonally adjacent cells similar to in
+        Consecutive Sudoku where clauses are added for each pair that is not
+        allowed in the 2 cells.
+        '''
         result = super().toCnf()
         N = self.nums
         x = lambda r,c,n : 1 + (r*N+c)*N + (n-1) # get variable number
@@ -416,35 +578,75 @@ class SatPuzzleSudokuMagicNumberX(SatPuzzleLatinSquareX):
         return result
 
 class SatPuzzleSudokuSamurai(SatPuzzleSudokuOverlap):
+    '''
+    Overlapped standard (size 9x9) Sudokus in the following arrangement:
+    AXX BXX
+    XXX XXX
+    XXCXXXX
+      XXX
+    DXXXEXX
+    XXX XXX
+    XXX XXX
+    Each letter is a sub block and ABCDE are the top left corners of the standard Sudokus.
+    This class only supports 3x3 sub blocks.
+    '''
     def __init__(self, givens: List[List[int]]):
+        '''
+        givens = 21x21 grid
+        '''
         super().__init__(3,3,givens,[(0,0),(0,12),(6,6),(12,0),(12,12)])
 
 class SatPuzzleSudokuOddEven(SatPuzzleSudokuStandard):
     '''
-    Variant with all odd numbers marked by circles
+    Sudoku variant that marks all odd numbers with circles and leaves all even
+    numbers unmarked.
     '''
     def __init__(self, blockR: int, blockC: int, givens: List[List[int]], odds: List[List[bool]]):
+        '''
+        blockR = rows per sub block
+        blockC = cols per sub block
+        givens = N x N grid (N = blockR*blockC)
+        odds = boolean array, True for numbers marked with circles
+        '''
         super().__init__(blockR,blockC,givens)
         N = len(givens)
         assert len(odds) == N and all(len(row) == N for row in odds)
         self.odds = [row[:] for row in odds]
     def toCnf(self) -> List[List[int]]:
+        '''
+        Add constraints for odd and even cells. These are expressed as negations
+        of assigning the opposite parity to cells.
+        '''
         result = super().toCnf()
         N = self.nums
         x = lambda r,c,n : 1 + (r*N+c)*N + (n-1) # get variable number
         for r,row in enumerate(self.odds):
             for c,odd in enumerate(row):
                 if odd:
-                    for n in range(2,N+1,2):
+                    for n in range(2,N+1,2): # cannot be even
+                        result.append([-x(r,c,n)])
+                else:
+                    for n in range(1,N+1,2): # cannot be odd
                         result.append([-x(r,c,n)])
         return result
 
 class SatPuzzleSudokuOddEvenSamurai(SatPuzzleSudokuSamurai):
+    '''
+    Odd Even Sudoku in the Samurai overlapping layout.
+    '''
     def __init__(self, givens: List[List[int]], odds: List[List[bool]]):
+        '''
+        givens = 15x15 grid
+        odds = 15x15 grid
+        '''
         super().__init__(givens)
         assert len(odds) == 21 and all(len(row) == 21 for row in odds)
         self.odds = [row[:] for row in odds]
     def toCnf(self) -> List[List[int]]:
+        '''
+        Handle these constraints with a more restrictive clause of possible
+        values which makes the all value clauses redundant.
+        '''
         result = super().toCnf()
         x = lambda r,c,n : 1 + (r*21+c)*9 + (n-1)
         unused_blocks = set([(0,3),(1,3),(3,0),(3,1),(3,5),(3,6),(5,3),(6,3)])
@@ -460,10 +662,18 @@ class SatPuzzleSudokuOddEvenSamurai(SatPuzzleSudokuSamurai):
 
 class SatPuzzleSudokuMarginalSum(SatPuzzleSudokuStandard):
     '''
-    Sudoku with no given cells. The clues are the sum of the first 3 numbers
-    from the edges. This class extends that notion to other block sizes.
+    Sudoku grid with no given cell clues. The clues given are the sum of the
+    first 3 numbers from the edges. This class extends to other sub block sizes.
     '''
     def __init__(self, blockR: int, blockC: int, top: List[int], bottom: List[int], left: List[int], right: List[int]):
+        '''
+        blockR = rows per sub block
+        blockC = cols per sub block
+        top = sum of top blockR numbers in each column
+        bottom = sum of bottom blockR numbers in each column
+        left = sum of left blockC numbers in each row
+        righth = sum of right blockC numbers in each row
+        '''
         N = blockR*blockC
         super().__init__(blockR,blockC,[[0]*N for _ in range(N)])
         assert len(top) == len(bottom) == len(left) == len(right) == N
@@ -472,6 +682,15 @@ class SatPuzzleSudokuMarginalSum(SatPuzzleSudokuStandard):
         self.left = left[:]
         self.right = right[:]
     def toCnf(self) -> List[List[int]]:
+        '''
+        The marginal sum constraints can be represented as clauses for the
+        permutations of numbers not allowed (not n1 or not n2 or ...). If the
+        numbers are assigned one of the disallowed permutations, there will be
+        a false clause. Otherwise, all these clauses will be true. This grows
+        exponentially in the blockR and blockC parameters so it is not a proper
+        reduction.
+        TODO research ways to make this reduction polynomial time and space
+        '''
         result = super().toCnf()
         N = self.nums
         br = self.blockR
@@ -502,28 +721,106 @@ class SatPuzzleSudokuMarginalSum(SatPuzzleSudokuStandard):
         return result
 
 class SatPuzzleSudokuShogun(SatPuzzleSudokuOverlap):
+    '''
+    Overlapped standard (size 9x9) Sudokus in the following arrangement:
+    AXX BXX CXX DXX
+    XXX XXX XXX XXX
+    XXEXXXFXXXGXXXX
+      XXX XXX XXX
+    HXXXIXXXJXXXKXX
+    XXX XXX XXX XXX
+    XXX XXX XXX XXX
+    Each letter is a sub block and ABCDEFGHIJK are the top left corners of the standard Sudokus.
+    This class only supports 3x3 sub blocks.
+    '''
     def __init__(self, givens: List[List[int]]):
+        '''
+        givens = 21x45 grid
+        '''
         super().__init__(3,3,givens,[(0,0),(0,12),(0,24),(0,36),(6,6),(6,18),(6,30),(12,0),(12,12),(12,24),(12,36)])
 
 class SatPuzzleSudokuSohei(SatPuzzleSudokuOverlap):
+    '''
+    Overlapped standard (size 9x9) Sudokus in the following arrangement:
+      AXX
+      XXX
+    BXXXCXX
+    XXX XXX
+    XXDXXXX
+      XXX
+      XXX
+    Each letter is a sub block and ABCD are the top left corners of the standard Sudokus.
+    This class only supports 3x3 sub blocks.
+    '''
     def __init__(self, givens: List[List[int]]):
+        '''
+        givens = 21x21 grid
+        '''
         super().__init__(3,3,givens,[(0,6),(6,0),(6,12),(12,6)])
 
 class SatPuzzleSudokuSumo(SatPuzzleSudokuOverlap):
+    '''
+    Overlapped standard (size 9x9) Sudokus in the following arrangement:
+    AXX BXX CXX
+    XXX XXX XXX
+    XXDXXXEXXXX
+      XXX XXX
+    FXXXGXXXHXX
+    XXX XXX XXX
+    XXIXXXJXXXX
+      XXX XXX
+    KXXXLXXXMXX
+    XXX XXX XXX
+    XXX XXX XXX
+    Each letter is a sub block and ABCDEFGHIJKLM are the top left corners of the standard Sudokus.
+    This class only supports 3x3 sub blocks.
+    '''
     def __init__(self, givens: List[List[int]]):
+        '''
+        givens = 33x33 grid
+        '''
         super().__init__(3,3,givens,[(0,0),(0,12),(0,24),(6,6),(6,18),(12,0),(12,12),(12,24),(18,6),(18,18),(24,0),(24,12),(24,24)])
 
 class SatPuzzleSudokuWindmill(SatPuzzleSudokuOverlap):
+    '''
+    Overlapped standard (size 9x9) Sudokus in the following arrangement:
+     AXX
+     XXXBXX
+     XCXXXX
+    DXXXXXX
+    XXXEXX
+    XXXXXX
+       XXX
+    Each letter is a sub block and ABCDE are the top left corners of the standard Sudokus.
+    This class only supports 3x3 sub blocks.
+    '''
     def __init__(self, givens: List[List[int]]):
+        '''
+        givens = 21x21 grid
+        '''
         super().__init__(3,3,givens,[(0,3),(3,12),(6,6),(9,0),(12,9)])
 
 class SatPuzzleSudokuComparison(SatPuzzleSudokuStandard):
+    '''
+    Empty Sudoku grid with all cell borders inside the sub blocks showing a less
+    than relation between adjacent cell pairs (within the same sub block).
+    '''
     def __init__(self, blockR: int, blockC: int, relations: Set[Tuple[Tuple[int,int],Tuple[int,int]]]):
+        '''
+        blockR = rows per sub block
+        blockC = cols per sub block
+        relations = cell pairs (r1,c1),(r2,c2) where r1,c1 value < r2,c2 value
+        '''
         N = blockR*blockC
         super().__init__(blockR,blockC,[[0]*(N) for _ in range(N)])
         assert all(0 <= r1 < N and 0 <= c1 < N and 0 <= r2 < N and 0 <= c2 < N for (r1,c1),(r2,c2) in relations)
         self.relations = set(p for p in relations)
     def toCnf(self) -> List[List[int]]:
+        '''
+        For each cell pair c1,c2 with c1 value < c2 value, add clauses:
+        not x(c1,b) or not x(c2,a) for 1 <= a < b <= N
+        This disallows all assignments that violate the less than constraint.
+        '''
         result = super().toCnf()
         N = self.nums
         x = lambda r,c,n : 1 + (r*N+c)*N + (n-1) # get variable number
@@ -535,7 +832,16 @@ class SatPuzzleSudokuComparison(SatPuzzleSudokuStandard):
         return result
 
 class SatPuzzleSuguruStandard(SatPuzzleSuguruGeneral):
+    '''
+    An M x N grid divided into areas. Each area of size A must contain the
+    numbers 1,2,..,N. The same number cannot be adjacent or diagonally adjacent.
+    '''
     def __init__(self, givens: List[List[int]], areas: List[List[int]]):
+        '''
+        givens = grid of given numbers, 0 for none, otherwise they must not be
+            larger than their area size
+        areas = area for each cell, each area represented by a unique symbol
+        '''
         R = len(givens)
         C = len(givens[0])
         self.rows = R
@@ -545,6 +851,12 @@ class SatPuzzleSuguruStandard(SatPuzzleSuguruGeneral):
         assert len(areas) == R and all(len(row) == C for row in areas)
         super().__init__(R*C,sum(areas,[]),sum(givens,[]))
     def toCnf(self) -> List[List[int]]:
+        '''
+        For each cell c1, add up to 8 constraints for neighboring cells c2:
+        - not x(c1,n) or not x(c2,n)
+        This needs to be done for all n limited by the size of the area(s) c1
+        and c2 are in.
+        '''
         result = super().toCnf()
         for r in range(self.rows):
             for c in range(self.cols):
@@ -571,7 +883,17 @@ class SatPuzzleSuguruStandard(SatPuzzleSuguruGeneral):
         return [sol[i:i+self.cols] for i in range(0,self.rows*self.cols,self.cols)]
 
 class SatPuzzleHakyuu(SatPuzzleSuguruGeneral):
+    '''
+    A Suguru variant that uses a different rule for restricting number
+    placement. Within each row/col, all occurrences of a number n must have at
+    least n cells between them.
+    '''
     def __init__(self, givens: List[List[int]], areas: List[List[int]]):
+        '''
+        givens = grid of given numbers, 0 for none, otherwise they must not be
+            larger than their area size
+        areas = area for each cell, each area represented by a unique symbol
+        '''
         R = len(givens)
         C = len(givens[0])
         self.rows = R
@@ -581,6 +903,13 @@ class SatPuzzleHakyuu(SatPuzzleSuguruGeneral):
         assert len(areas) == R and all(len(row) == C for row in areas)
         super().__init__(R*C,sum(areas,[]),sum(givens,[]))
     def toCnf(self) -> List[List[int]]:
+        '''
+        For each cell c1 and a number n, x(c1,n) implies n is not assigned to
+        some cells in the same row/col depending on n. For each cell c2 from 1
+        to n away from c1 in the same row/col, add this constraint if n is <=
+        the size of the area(s) of c1 and c2:
+        - not x(c1,n) or not x(c2,n)
+        '''
         result = super().toCnf()
         for r in range(self.rows):
             for c in range(self.cols):
@@ -603,4 +932,58 @@ class SatPuzzleHakyuu(SatPuzzleSuguruGeneral):
         sol = super().toSol(satSol)
         return [sol[i:i+self.cols] for i in range(0,self.rows*self.cols,self.cols)]
 
-# TODO better documentation for all puzzle types
+class SatPuzzleSukaku(SatPuzzleSudokuStandard):
+    '''
+    Standard Sudoku with a candidate set given for each cell.
+    '''
+    def __init__(self, blockR: int, blockC: int, candidates: List[List[List[int]]]):
+        '''
+        blockR = rows per sub block
+        blockC = cols per sub block
+        candidates = N x N grid of candidate list for each cell
+        '''
+        N = blockR*blockC
+        super().__init__(blockR,blockC,[[0]*N for _ in range(N)])
+        assert len(candidates) == N and all(len(row) == N for row in candidates)
+        assert all(all(len(set(values)) == len(values) and all(1 <= value <= N for value in values) for values in row) for row in candidates)
+        self.candidates = [[values[:] for values in row] for row in candidates]
+    def toCnf(self) -> List[List[int]]:
+        '''
+        The additional constraints added constrain cell values to those in the
+        candidate sets. This makes the original constraints redundant for
+        assigning a value to a cell.
+        '''
+        result = super().toCnf()
+        N = self.nums
+        x = lambda r,c,n : 1 + (r*N+c)*N + (n-1)
+        for r in range(N):
+            for c in range(N):
+                result.append([x(r,c,n) for n in self.candidates[r][c]])
+        return result
+
+class SatPuzzleSukakuJigsaw(SatPuzzleSudokuJigsaw):
+    '''
+    Sukaku, but with irregularly shaped areas instead of rectangular.
+    '''
+    def __init__(self, areas: List[List[int]], candidates: List[List[List[int]]]):
+        '''
+        areas = N x N grid of cell areas, each area is a unique symbol
+        candidates = N x N grid of candidate list for each cell
+        '''
+        N = len(areas)
+        super().__init__([[0]*N for _ in range(N)],areas)
+        assert len(candidates) == N and all(len(row) == N for row in candidates)
+        assert all(all(len(set(values)) == len(values) and all(1 <= value <= N for value in values) for values in row) for row in candidates)
+        self.candidates = [[values[:] for values in row] for row in candidates]
+    def toCnf(self) -> List[List[int]]:
+        '''
+        The constraints here are handled exactly the same way as they are in
+        regular Sukaku.
+        '''
+        result = super().toCnf()
+        N = self.nums
+        x = lambda r,c,n : 1 + (r*N+c)*N + (n-1)
+        for r in range(N):
+            for c in range(N):
+                result.append([x(r,c,n) for n in self.candidates[r][c]])
+        return result
